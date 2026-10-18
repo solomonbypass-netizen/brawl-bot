@@ -16,9 +16,8 @@ BOT_TOKEN = "8645936875:AAF3vd-v31W7GEfb3FhClr_quCDKaFSMggU"
 TARGET_CHAT_ID = 6985905211
 FUNPAY_URL = "https://funpay.com/lots/436/"
 SEEN_FILE = "seen_offers.json"
-CHECK_INTERVAL_SECONDS = 45  # Scan interval in seconds
+CHECK_INTERVAL_SECONDS = 40  # Fast scan loop
 
-# Configure logging
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     level=logging.INFO
@@ -33,7 +32,7 @@ HEADERS = {
 }
 
 COOKIES = {
-    "cy": "rub"  # Force FunPay to always respond with Russian Rubles (RUB)
+    "cy": "rub"
 }
 
 # ---------------- HTTP HEALTH CHECK FOR RENDER ----------------
@@ -78,25 +77,27 @@ bot_stats = {
     "alerts_sent": 0
 }
 
-# ---------------- ADVANCED PARSER & VALUATION ----------------
-PATTERN_STATS = re.compile(r"(\d+)\s*кубк\w*,\s*(\d+)\s*бравлер\w*(?:,\s*(\d+)\s*прайм\w*)?", re.IGNORECASE)
+# ---------------- TARGET LIQUIDITY TRIGGERS ----------------
+OG_SKINS = [
+    "звездная шелли", "star shelly", "шелли 2018", "2018", "2019", "корсар кольт",
+    "рикошет", "вирус 8-бит", "вирус", "ведьма шелли", "оборотень леон",
+    "торговец гейл", "паладин вольт", "майк портье", "хэллоуин", "олд акк"
+]
 
 SPAM_KEYWORDS = [
     "договорная", "цена в лс", "писать в лс", "в лс", "не покупать", 
     "куплю", "обмен", "тест", "витрина", "предлагайте", "предлагать", 
-    "цена договор", "договор", "отзыв", "пустышка"
+    "цена договор", "договор", "отзыв", "пустышка", "минус", "-гем", "отрицательн"
 ]
 
+GEMS_REGEX = re.compile(r"(\d{2,4})\s*(?:гем|gem)", re.IGNORECASE)
+BP_REGEX = re.compile(r"(?:бп\+|brawl\s*pass\+|бравл\s*пасс\+|куплен\s*бп)", re.IGNORECASE)
+SKINS_COUNT_REGEX = re.compile(r"(\d{2,3})\s*скин", re.IGNORECASE)
+PATTERN_STATS = re.compile(r"(\d+)\s*кубк\w*,\s*(\d+)\s*бравлер\w*(?:,\s*(\d+)\s*прайм\w*)?", re.IGNORECASE)
+
 def extract_exact_rub_price(price_el):
-    """
-    Extracts the true, accurate price in RUB.
-    FunPay stores the exact price in RUB inside the 'data-s' attribute.
-    This prevents foreign currency errors (e.g. 206.26 USD treated as 206 RUB).
-    """
     if not price_el:
         return 0.0
-
-    # 1. Primary: 'data-s' attribute (FunPay's source of truth in base currency/RUB)
     data_s = price_el.get("data-s")
     if data_s:
         try:
@@ -106,7 +107,6 @@ def extract_exact_rub_price(price_el):
         except ValueError:
             pass
 
-    # 2. Fallback: Parse text and account for currencies
     text = price_el.get_text(strip=True)
     cleaned = re.sub(r"[^\d.]", "", text.replace(" ", "").replace(",", "."))
     try:
@@ -114,7 +114,6 @@ def extract_exact_rub_price(price_el):
     except ValueError:
         return 0.0
 
-    # Currency exchange rate fallback if FunPay ignored cookie
     if "$" in text or "usd" in text.lower():
         return round(val * 95.0, 2)
     elif "€" in text or "eur" in text.lower():
@@ -122,23 +121,81 @@ def extract_exact_rub_price(price_el):
 
     return round(val, 2)
 
-def calculate_trust_score(seller, reviews, has_mail):
-    """Calculates risk and trust rating (1 to 10)."""
-    score = 5
-    if reviews >= 50:
-        score += 3
-    elif reviews >= 15:
-        score += 2
-    elif reviews == 0:
-        score -= 3
+def analyze_lot_liquidity(lot_dict):
+    """
+    Evaluates real market liquidity and profit margin in Telegram resale.
+    Returns: (is_liquid, triggers_list, est_tg_price, profit)
+    """
+    price = lot_dict["price"]
+    desc_lower = lot_dict["desc"].lower()
+    brawlers = lot_dict["brawlers"]
+    primes = lot_dict["primes"]
+    trophies = lot_dict["trophies"]
 
-    if has_mail:
-        score += 2
+    # Filter out scam negative gems (e.g. -4554 гемов)
+    if any(k in desc_lower for k in ["-гем", "минус", "отрицательн", "долг"]):
+        return False, [], 0, 0
 
-    return max(1, min(10, score))
+    triggers = []
+    est_tg_price = 0
+
+    # 1. OG / Exclusive Skins check
+    found_og = [s for s in OG_SKINS if s in desc_lower]
+    if found_og and price <= 450:
+        triggers.append(f"👑 <b>OG-раритет:</b> {found_og[0].upper()}")
+        est_tg_price = max(est_tg_price, 1100)
+
+    # 2. Donat balance check (Gems / Pass)
+    gems_match = GEMS_REGEX.search(desc_lower)
+    if gems_match:
+        gems = int(gems_match.group(1))
+        # Ensure it's not negative
+        if gems >= 80 and price <= 380:
+            triggers.append(f"💎 <b>Баланс:</b> {gems} гемов")
+            est_tg_price = max(est_tg_price, 850 + (gems * 3))
+
+    if bool(BP_REGEX.search(desc_lower)) and price <= 420:
+        triggers.append("🎟️ <b>Куплен Brawl Pass+</b>")
+        est_tg_price = max(est_tg_price, 950)
+
+    # 3. High skins count check
+    skins_match = SKINS_COUNT_REGEX.search(desc_lower)
+    if skins_match:
+        skins_cnt = int(skins_match.group(1))
+        if skins_cnt >= 70 and price <= 390:
+            triggers.append(f"🎨 <b>Скин-коллекция:</b> {skins_cnt} скинов")
+            est_tg_price = max(est_tg_price, 1200)
+
+    # 4. Pure character unlock disparity (78+ brawlers at throwaway price)
+    if brawlers >= 78 and price <= 380:
+        triggers.append(f"👤 <b>Фулл-ростер:</b> {brawlers} бравлеров всего за {price:g}₽")
+        est_tg_price = max(est_tg_price, 900)
+
+    # 5. Heavy 11-lvl maxed powers smurf
+    if primes >= 14 and price <= 380:
+        triggers.append(f"⚡ <b>Готовая основа:</b> {primes} бойцов на 11 силе")
+        est_tg_price = max(est_tg_price, 950)
+
+    # 6. Overall fast flip condition: 25k+ trophies, 70+ brawlers at <= 260 RUB
+    if trophies >= 25000 and brawlers >= 70 and price <= 260:
+        triggers.append(f"🔥 <b>Срочный сброс:</b> 25k+ кубков за {price:g}₽")
+        est_tg_price = max(est_tg_price, 750)
+
+    if not triggers:
+        return False, [], 0, 0
+
+    # Minimum base Telegram market resale floor for a verified good account
+    if est_tg_price == 0:
+        est_tg_price = 700
+
+    profit = est_tg_price - price
+    # Only consider liquid if expected net profit is at least 350 RUB
+    if profit >= 350 and price <= 450:
+        return True, triggers, round(est_tg_price), round(profit)
+
+    return False, [], 0, 0
 
 def fetch_lots():
-    """Fetches FunPay Brawl Stars section, parses and strictly validates lots."""
     try:
         resp = requests.get(FUNPAY_URL, headers=HEADERS, cookies=COOKIES, timeout=15)
         if resp.status_code != 200:
@@ -172,8 +229,12 @@ def fetch_lots():
             seller = user_el.get_text(strip=True) if user_el else "Неизвестен"
             reviews = int(rating_el.get_text(strip=True)) if rating_el else 0
 
-            # Filter out non-actionable lots (0 rub, or obvious spam)
-            if price <= 10.0:
+            # Exclude non-relevant prices (too high or 0)
+            if price < 100 or price > 450:
+                continue
+
+            desc_lower = desc.lower()
+            if any(kw in desc_lower for kw in SPAM_KEYWORDS):
                 continue
 
             match = PATTERN_STATS.search(desc)
@@ -181,33 +242,11 @@ def fetch_lots():
             brawlers = int(match.group(2)) if match and match.group(2) else 0
             primes = int(match.group(3)) if match and match.group(3) else 0
 
-            desc_lower = desc.lower()
-
-            # Anti-Spam / Placeholder detection
-            is_spam = any(kw in desc_lower for kw in SPAM_KEYWORDS)
-
-            # Mail verification
             has_firstmail = any(k in desc_lower for k in [
-                "firstmail", "родная почта", "родная", "с почтой", "отдам почту", 
-                "чистая почта", "почта рамблер", "рамблер", "mail.ru", "почта отдается"
+                "firstmail", "родная почта", "родная", "с почтой", "отдам почту", "чистая почта"
             ])
 
-            # Realistic Trophies normalization (fix typo values like 145000 or 500000)
-            valid_trophies = trophies
-            if trophies > 95000:
-                # If someone claims >95k trophies, cap the valuation score to a realistic max
-                valid_trophies = min(trophies, 70000)
-
-            # Realistic Market Valuation in Telegram (RUB):
-            # Accounts with 60+ brawlers and 25k-40k trophies easily sell for 800 - 2200 RUB
-            est_value = (valid_trophies * 0.035) + (brawlers * 18.0) + (primes * 35.0)
-
-            # Net Estimated Profit
-            net_profit = est_value - price
-            margin_score = (est_value / price) if price > 0 else 0
-            trust_score = calculate_trust_score(seller, reviews, has_firstmail)
-
-            parsed_lots.append({
+            lot_raw = {
                 "offer_id": offer_id,
                 "href": href,
                 "price": price,
@@ -217,167 +256,110 @@ def fetch_lots():
                 "seller": seller,
                 "reviews": reviews,
                 "desc": desc,
-                "has_firstmail": has_firstmail,
-                "is_spam": is_spam,
-                "trust_score": trust_score,
-                "est_value": round(est_value),
-                "net_profit": round(net_profit),
-                "margin_score": round(margin_score, 1)
-            })
+                "has_firstmail": has_firstmail
+            }
+
+            is_liquid, triggers, est_tg_price, profit = analyze_lot_liquidity(lot_raw)
+
+            if is_liquid:
+                lot_raw["triggers"] = triggers
+                lot_raw["est_tg_price"] = est_tg_price
+                lot_raw["profit"] = profit
+                parsed_lots.append(lot_raw)
 
         return parsed_lots
     except Exception as e:
         logger.error(f"Error fetching lots: {e}")
         return []
 
-def format_lot_message(lot, is_new_alert=False):
-    """Formats lot into a detailed analytical dossier."""
-    title = "🚨 <b>НОВЫЙ ВЫГОДНЫЙ АККАУНТ НА FUNPAY!</b>" if is_new_alert else "💎 <b>АНАЛИЗ ЛОТА ПОД ПЕРЕПРОДАЖУ:</b>"
+def format_gold_message(lot, is_new_alert=False):
+    title = "🚨 <b>НАЙДЕН ОКУПНОЙ АККАУНТ НА FUNPAY!</b>" if is_new_alert else "💰 <b>ОКУПНОЙ ЛОТ ПОД БЫСТРЫЙ ФЛИП:</b>"
+    mail_badge = "🟢 <b>Родная почта (Firstmail)</b>" if lot["has_firstmail"] else "🟡 <b>Почту уточнять у продавца</b>"
     
-    # Mail badge
-    if lot["has_firstmail"]:
-        mail_badge = "🟢 <b>Родная почта / Firstmail подтверждена</b>"
-    else:
-        mail_badge = "🟡 <b>Почту нужно уточнять (перепривязка)</b>"
-
-    # Trust badge
-    if lot["trust_score"] >= 8:
-        trust_badge = f"🛡️ <b>Надежность:</b> <code>Высокая ({lot['trust_score']}/10)</code> ⭐ Проверенный"
-    elif lot["trust_score"] >= 5:
-        trust_badge = f"⚖️ <b>Надежность:</b> <code>Средняя ({lot['trust_score']}/10)</code>"
-    else:
-        trust_badge = f"⚠️ <b>Надежность:</b> <code>Новичок ({lot['trust_score']}/10)</code> <i>Проверяй данные перед подтверждением!</i>"
-
-    profit_color = "🟢" if lot["net_profit"] > 0 else "🔴"
+    triggers_text = "\n".join([f"• {t}" for t in lot["triggers"]])
 
     msg = (
         f"{title}\n\n"
+        f"🎯 <b>ПОЧЕМУ ЭТО ОКУП:</b>\n"
+        f"{triggers_text}\n\n"
         f"💵 <b>Цена на FunPay:</b> <code>{lot['price']:g} ₽</code>\n"
-        f"📈 <b>Рыночная цена в ТГ:</b> ~<code>{lot['est_value']} ₽</code> (<b>x{lot['margin_score']}</b>)\n"
-        f"{profit_color} <b>Ожидаемая чистая прибыль:</b> <b>+{lot['net_profit']} ₽</b>\n\n"
-        f"🏆 <b>Кубков:</b> <b>{lot['trophies']:,}</b>\n"
-        f"👤 <b>Бравлеров:</b> <b>{lot['brawlers']}</b>\n"
-        f"⚡ <b>Праймов (11 ур):</b> <b>{lot['primes']}</b>\n\n"
+        f"📈 <b>Реальная продажа в ТГ:</b> ~<code>{lot['est_tg_price']} ₽</code>\n"
+        f"🟢 <b>Твой чистый профит:</b> <b>+{lot['profit']} ₽</b>\n\n"
+        f"🏆 <b>Кубков:</b> <b>{lot['trophies']:,}</b> | 👤 <b>Бравлеров:</b> <b>{lot['brawlers']}</b> | ⚡ <b>Праймов:</b> <b>{lot['primes']}</b>\n"
         f"👤 <b>Продавец:</b> {lot['seller']} (⭐ <b>{lot['reviews']}</b> отзывов)\n"
-        f"{trust_badge}\n"
         f"{mail_badge}\n\n"
-        f"📝 <i>{lot['desc'][:120]}...</i>"
+        f"📝 <i>{lot['desc'][:115]}...</i>"
     )
     return msg
 
 def make_lot_keyboard(href):
     kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton(text="🔗 Купить на FunPay", url=href))
+    kb.add(types.InlineKeyboardButton(text="🔗 Забрать на FunPay", url=href))
     return kb
 
 def get_main_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    btn_tier1 = types.KeyboardButton("💎 Топ TIER-1 (Надежные)")
-    btn_hot = types.KeyboardButton("🚀 Все горячие лоты")
-    btn_flip = types.KeyboardButton("⚡ Быстрый флип (< 500₽)")
-    btn_status = types.KeyboardButton("📊 Статус и статистика")
-    kb.add(btn_tier1, btn_hot)
-    kb.add(btn_flip, btn_status)
+    btn_flip = types.KeyboardButton("🚀 Найти окупные лоты прямо сейчас")
+    btn_status = types.KeyboardButton("📊 Статус мониторинга")
+    kb.add(btn_flip)
+    kb.add(btn_status)
     return kb
 
 # ---------------- BOT COMMAND HANDLERS ----------------
 @bot.message_handler(commands=["start", "help"])
 def cmd_start(message):
     text = (
-        "👋 <b>Добро пожаловать в обновленный FunPay Brawl Stars Arbitrage Scanner!</b>\n\n"
-        "<b>Что обновлено:</b>\n"
-        "• Точный расчет цен в рублях (без ошибок валют)\n"
-        "• Фильтр спама и фейковых кубков\n"
-        "• Индекс доверия к продавцу (Trust Score 1-10)\n"
-        "• Расчет ожидаемой чистой прибыли в рублях\n\n"
-        "Выбери нужный фильтр поиска ниже:"
+        "👋 <b>Снайпер окупных аккаунтов Brawl Stars активен!</b>\n\n"
+        "<b>Критерии жесткого отбора (только реальный профит):</b>\n"
+        "• Цена строго <b>100–450 ₽</b> (минимальный риск)\n"
+        "• Наличие <b>OG-скинов (2018–2020)</b> или <b>запас гемов/Brawl Pass</b>\n"
+        "• Или <b>78+ бравлеров / 14+ праймов</b> за копейки\n"
+        "• Чистая окупаемость от <b>+350 ₽ до +1200 ₽</b> со сделки\n\n"
+        "Нажимай кнопку ниже для поиска:"
     )
     bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard())
 
-@bot.message_handler(func=lambda m: m.text and any(k in m.text for k in ["TIER-1", "Только с родной почтой", "Надежные"]))
-def handle_tier1(message):
-    bot.send_message(message.chat.id, "🔍 Ищу TIER-1 лоты (проверенные продавцы + высокая маржа + родная почта)...")
+@bot.message_handler(func=lambda m: m.text and any(k in m.text.lower() for k in ["найти", "окуп", "лоты", "горяч", "флип"]))
+def handle_find_deals(message):
+    bot.send_message(message.chat.id, "🔍 Сканирую FunPay по триггерам ликвидности (OG-скины, баланс гемов, сброс прокачки)...")
     lots = fetch_lots()
     
-    candidates = [
-        l for l in lots
-        if not l["is_spam"] and 200 <= l["price"] <= 1500 and l["trust_score"] >= 6 and l["trophies"] >= 20000 and l["margin_score"] >= 2.2
-    ]
-    candidates.sort(key=lambda x: (x["trust_score"], x["margin_score"]), reverse=True)
+    # Sort primarily by expected profit descending
+    lots.sort(key=lambda x: (x["reviews"] >= 10, x["profit"]), reverse=True)
 
-    if not candidates:
-        bot.send_message(message.chat.id, "Сейчас нет лотов, подходящих под строгий TIER-1. Попробуй «Все горячие лоты».", reply_markup=get_main_keyboard())
+    if not lots:
+        bot.send_message(message.chat.id, "Сейчас на FunPay нет лотов, проходящих фильтр окупаемости. Мониторинг ждет новые вбросы!", reply_markup=get_main_keyboard())
         return
 
-    bot.send_message(message.chat.id, f"✅ Найдено <b>{len(candidates)}</b> проверенных TIER-1 аккаунтов. Вот лучшие:", reply_markup=get_main_keyboard())
-    for lot in candidates[:3]:
-        bot.send_message(message.chat.id, format_lot_message(lot), reply_markup=make_lot_keyboard(lot["href"]))
+    bot.send_message(message.chat.id, f"✅ Отобрано <b>{len(lots)}</b> реально окупных вариантов (до 450₽). Вот ТОП-3:")
+    for lot in lots[:3]:
+        bot.send_message(message.chat.id, format_gold_message(lot), reply_markup=make_lot_keyboard(lot["href"]))
 
-@bot.message_handler(func=lambda m: m.text and any(k in m.text for k in ["Найти лучшие лоты", "Все горячие лоты", "горячие лоты", "лучшие лоты"]))
-def handle_hot_deals(message):
-    bot.send_message(message.chat.id, "🔍 Сканирую каталог FunPay на максимальную маржу...")
-    lots = fetch_lots()
-    candidates = [
-        l for l in lots 
-        if not l["is_spam"] and 150 <= l["price"] <= 1200 and l["trophies"] >= 15000 and l["brawlers"] >= 55 and l["margin_score"] >= 2.5
-    ]
-    candidates.sort(key=lambda x: x["margin_score"], reverse=True)
-
-    if not candidates:
-        bot.send_message(message.chat.id, "Горячих предложений прямо сейчас нет. Мониторинг ждет новые лоты.", reply_markup=get_main_keyboard())
-        return
-
-    bot.send_message(message.chat.id, f"✅ Найдено <b>{len(candidates)}</b> выгодных лотов. ТОП-3 по марже:", reply_markup=get_main_keyboard())
-    for lot in candidates[:3]:
-        bot.send_message(message.chat.id, format_lot_message(lot), reply_markup=make_lot_keyboard(lot["href"]))
-
-@bot.message_handler(func=lambda m: m.text and any(k in m.text for k in ["Быстрый флип", "флип"]))
-def handle_quick_flip(message):
-    bot.send_message(message.chat.id, "🔍 Ищу дешевые аккаунты до 500₽ для быстрого оборота...")
-    lots = fetch_lots()
-    candidates = [
-        l for l in lots 
-        if not l["is_spam"] and 150 <= l["price"] <= 500 and l["trophies"] >= 15000 and l["brawlers"] >= 50 and l["margin_score"] >= 2.5
-    ]
-    candidates.sort(key=lambda x: x["net_profit"], reverse=True)
-
-    if not candidates:
-        bot.send_message(message.chat.id, "Дешевых аномалий до 500₽ сейчас нет.", reply_markup=get_main_keyboard())
-        return
-
-    bot.send_message(message.chat.id, f"✅ Найдено <b>{len(candidates)}</b> лотов для быстрого флипа. Топ-3:", reply_markup=get_main_keyboard())
-    for lot in candidates[:3]:
-        bot.send_message(message.chat.id, format_lot_message(lot), reply_markup=make_lot_keyboard(lot["href"]))
-
-@bot.message_handler(func=lambda m: m.text and any(k in m.text for k in ["Статус", "статус"]))
+@bot.message_handler(func=lambda m: m.text and "статус" in m.text.lower())
 def handle_status(message):
     uptime_sec = int(time.time() - bot_stats["start_time"])
     hours = uptime_sec // 3600
     minutes = (uptime_sec % 3600) // 60
 
     text = (
-        "📊 <b>СТАТУС ОБЛАЧНОГО МОНИТОРИНГА:</b>\n\n"
+        "📊 <b>СТАТУС МОНИТОРИНГА:</b>\n\n"
         f"🟢 <b>Сервер:</b> Render Cloud 24/7\n"
         f"⏱ <b>Время работы:</b> {hours} ч. {minutes} мин.\n"
-        f"🔄 <b>Проведено циклов сканирования:</b> {bot_stats['scans_count']}\n"
+        f"🔄 <b>Проведено сканов:</b> {bot_stats['scans_count']}\n"
         f"🕒 <b>Крайний скан:</b> {bot_stats['last_scan_time']}\n"
-        f"📦 <b>База известных лотов:</b> {len(seen_offers)} шт.\n"
         f"🔔 <b>Отправлено новых алертов:</b> {bot_stats['alerts_sent']}\n\n"
-        "⚡ <i>Защита от валютных ошибок и спам-фильтр активны.</i>"
+        "🎯 <i>Фильтры: цена до 450₽, OG-скины, баланс гемов, защита от минусового баланса.</i>"
     )
     bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard())
 
 @bot.message_handler(func=lambda m: True)
 def handle_fallback(message):
-    # Any unexpected text triggers a search and refreshes keyboard
-    bot.send_message(message.chat.id, "🔍 Запускаю поиск по FunPay...", reply_markup=get_main_keyboard())
-    handle_hot_deals(message)
-
+    handle_find_deals(message)
 
 # ---------------- BACKGROUND SCANNER THREAD ----------------
 def background_scanner_loop():
     global seen_offers, bot_stats
-    logger.info("Starting background scanner thread...")
+    logger.info("Starting background sniper scanner...")
     is_initial_run = (len(seen_offers) == 0)
 
     while True:
@@ -396,27 +378,16 @@ def background_scanner_loop():
                         new_offers_count += 1
 
                         if not is_initial_run:
-                            # Strict alert filter for push notification:
-                            # 1. Price between 150 and 1200 RUB
-                            # 2. At least 18,000 trophies and 60 brawlers
-                            # 3. Margin >= 2.5x and net profit >= 500 RUB
-                            # 4. Not spam
-                            if (not lot["is_spam"] and 
-                                150 <= lot["price"] <= 1200 and 
-                                lot["trophies"] >= 18000 and 
-                                lot["brawlers"] >= 60 and 
-                                lot["margin_score"] >= 2.5 and
-                                lot["net_profit"] >= 500):
+                            # Push notification for truly profitable finds
+                            logger.info(f"GOLD MINE FOUND: {lot['price']} RUB, ID: {oid}")
+                            msg = format_gold_message(lot, is_new_alert=True)
+                            kb = make_lot_keyboard(lot["href"])
 
-                                logger.info(f"HOT DEAL ALERT! {lot['price']} RUB, {lot['trophies']} trophies, ID: {oid}")
-                                msg = format_lot_message(lot, is_new_alert=True)
-                                kb = make_lot_keyboard(lot["href"])
-
-                                try:
-                                    bot.send_message(TARGET_CHAT_ID, msg, reply_markup=kb)
-                                    bot_stats["alerts_sent"] += 1
-                                except Exception as e:
-                                    logger.error(f"Error sending alert: {e}")
+                            try:
+                                bot.send_message(TARGET_CHAT_ID, msg, reply_markup=kb)
+                                bot_stats["alerts_sent"] += 1
+                            except Exception as e:
+                                logger.error(f"Error sending alert: {e}")
 
                 if is_initial_run:
                     logger.info(f"Initial seeding complete: {len(seen_offers)} offers cached.")
@@ -425,7 +396,7 @@ def background_scanner_loop():
                 else:
                     if new_offers_count > 0:
                         save_seen_offers(seen_offers)
-                        logger.info(f"Processed {new_offers_count} newly listed offers.")
+                        logger.info(f"Cached {new_offers_count} new lots.")
 
         except Exception as e:
             logger.error(f"Error in background scanner: {e}")
@@ -434,18 +405,14 @@ def background_scanner_loop():
 
 # ---------------- MAIN ENTRYPOINT ----------------
 if __name__ == "__main__":
-    logger.info("Starting updated FunPay Brawl Stars Engine...")
+    logger.info("Starting FunPay Brawl Stars Sniper...")
 
-    # Start health-check server for Render
     http_thread = threading.Thread(target=run_http_server, daemon=True)
     http_thread.start()
-    logger.info(f"Health-check server running on port {os.environ.get('PORT', 10000)}")
 
-    # Start background monitor
     scanner_thread = threading.Thread(target=background_scanner_loop, daemon=True)
     scanner_thread.start()
 
-    # Start Telegram polling
     logger.info("Bot polling Telegram...")
     while True:
         try:
