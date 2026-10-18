@@ -5,10 +5,27 @@ import time
 import json
 import logging
 import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
 from bs4 import BeautifulSoup
 import telebot
 from telebot import types
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"FunPay Bot is Alive and Running 24/7!")
+
+    def log_message(self, format, *args):
+        pass # Silence HTTP logs
+
+def run_http_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
 
 # ---------------- CONFIGURATION ----------------
 BOT_TOKEN = "8645936875:AAF3vd-v31W7GEfb3FhClr_quCDKaFSMggU"
@@ -333,9 +350,15 @@ def background_scanner_loop():
 if __name__ == "__main__":
     logger.info("Initializing FunPay Brawl Stars Bot...")
     
+    # Start HTTP server thread for Render free web service health checks
+    http_thread = threading.Thread(target=run_http_server, daemon=True)
+    http_thread.start()
+    logger.info(f"Health-check HTTP server started on port {os.environ.get('PORT', 10000)}")
+
     # Start background thread
     scanner_thread = threading.Thread(target=background_scanner_loop, daemon=True)
     scanner_thread.start()
+
     
     # Start Telegram polling
     logger.info("Bot is now polling Telegram for commands...")
