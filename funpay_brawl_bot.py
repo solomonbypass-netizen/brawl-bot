@@ -294,12 +294,11 @@ def cmd_start(message):
     )
     bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard())
 
-@bot.message_handler(func=lambda m: m.text == "💎 Топ TIER-1 (Надежные)")
+@bot.message_handler(func=lambda m: m.text and any(k in m.text for k in ["TIER-1", "Только с родной почтой", "Надежные"]))
 def handle_tier1(message):
     bot.send_message(message.chat.id, "🔍 Ищу TIER-1 лоты (проверенные продавцы + высокая маржа + родная почта)...")
     lots = fetch_lots()
     
-    # Filter TIER-1: Not spam, real price 200-1500 RUB, trust score >= 6, trophies >= 20000, margin >= 2.2x
     candidates = [
         l for l in lots
         if not l["is_spam"] and 200 <= l["price"] <= 1500 and l["trust_score"] >= 6 and l["trophies"] >= 20000 and l["margin_score"] >= 2.2
@@ -307,16 +306,16 @@ def handle_tier1(message):
     candidates.sort(key=lambda x: (x["trust_score"], x["margin_score"]), reverse=True)
 
     if not candidates:
-        bot.send_message(message.chat.id, "Сейчас нет лотов, подходящих под строгий TIER-1. Попробуй «Все горячие лоты».")
+        bot.send_message(message.chat.id, "Сейчас нет лотов, подходящих под строгий TIER-1. Попробуй «Все горячие лоты».", reply_markup=get_main_keyboard())
         return
 
-    bot.send_message(message.chat.id, f"✅ Найдено <b>{len(candidates)}</b> проверенных TIER-1 аккаунтов. Вот лучшие:")
+    bot.send_message(message.chat.id, f"✅ Найдено <b>{len(candidates)}</b> проверенных TIER-1 аккаунтов. Вот лучшие:", reply_markup=get_main_keyboard())
     for lot in candidates[:3]:
         bot.send_message(message.chat.id, format_lot_message(lot), reply_markup=make_lot_keyboard(lot["href"]))
 
-@bot.message_handler(func=lambda m: m.text == "🚀 Все горячие лоты")
+@bot.message_handler(func=lambda m: m.text and any(k in m.text for k in ["Найти лучшие лоты", "Все горячие лоты", "горячие лоты", "лучшие лоты"]))
 def handle_hot_deals(message):
-    bot.send_message(message.chat.id, "🔍 Сканирую каталог на максимальную маржу...")
+    bot.send_message(message.chat.id, "🔍 Сканирую каталог FunPay на максимальную маржу...")
     lots = fetch_lots()
     candidates = [
         l for l in lots 
@@ -325,14 +324,14 @@ def handle_hot_deals(message):
     candidates.sort(key=lambda x: x["margin_score"], reverse=True)
 
     if not candidates:
-        bot.send_message(message.chat.id, "Горячих предложений прямо сейчас нет. Мониторинг ждет новые лоты.")
+        bot.send_message(message.chat.id, "Горячих предложений прямо сейчас нет. Мониторинг ждет новые лоты.", reply_markup=get_main_keyboard())
         return
 
-    bot.send_message(message.chat.id, f"✅ Найдено <b>{len(candidates)}</b> выгодных лотов. ТОП-3 по марже:")
+    bot.send_message(message.chat.id, f"✅ Найдено <b>{len(candidates)}</b> выгодных лотов. ТОП-3 по марже:", reply_markup=get_main_keyboard())
     for lot in candidates[:3]:
         bot.send_message(message.chat.id, format_lot_message(lot), reply_markup=make_lot_keyboard(lot["href"]))
 
-@bot.message_handler(func=lambda m: m.text == "⚡ Быстрый флип (< 500₽)")
+@bot.message_handler(func=lambda m: m.text and any(k in m.text for k in ["Быстрый флип", "флип"]))
 def handle_quick_flip(message):
     bot.send_message(message.chat.id, "🔍 Ищу дешевые аккаунты до 500₽ для быстрого оборота...")
     lots = fetch_lots()
@@ -343,14 +342,14 @@ def handle_quick_flip(message):
     candidates.sort(key=lambda x: x["net_profit"], reverse=True)
 
     if not candidates:
-        bot.send_message(message.chat.id, "Дешевых аномалий до 500₽ сейчас нет.")
+        bot.send_message(message.chat.id, "Дешевых аномалий до 500₽ сейчас нет.", reply_markup=get_main_keyboard())
         return
 
-    bot.send_message(message.chat.id, f"✅ Найдено <b>{len(candidates)}</b> лотов для быстрого флипа. Топ-3:")
+    bot.send_message(message.chat.id, f"✅ Найдено <b>{len(candidates)}</b> лотов для быстрого флипа. Топ-3:", reply_markup=get_main_keyboard())
     for lot in candidates[:3]:
         bot.send_message(message.chat.id, format_lot_message(lot), reply_markup=make_lot_keyboard(lot["href"]))
 
-@bot.message_handler(func=lambda m: m.text == "📊 Статус и статистика")
+@bot.message_handler(func=lambda m: m.text and any(k in m.text for k in ["Статус", "статус"]))
 def handle_status(message):
     uptime_sec = int(time.time() - bot_stats["start_time"])
     hours = uptime_sec // 3600
@@ -366,7 +365,14 @@ def handle_status(message):
         f"🔔 <b>Отправлено новых алертов:</b> {bot_stats['alerts_sent']}\n\n"
         "⚡ <i>Защита от валютных ошибок и спам-фильтр активны.</i>"
     )
-    bot.send_message(message.chat.id, text)
+    bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard())
+
+@bot.message_handler(func=lambda m: True)
+def handle_fallback(message):
+    # Any unexpected text triggers a search and refreshes keyboard
+    bot.send_message(message.chat.id, "🔍 Запускаю поиск по FunPay...", reply_markup=get_main_keyboard())
+    handle_hot_deals(message)
+
 
 # ---------------- BACKGROUND SCANNER THREAD ----------------
 def background_scanner_loop():
