@@ -29,18 +29,31 @@ def format_gold_message(lot, is_new_alert=False):
     return msg
 
 def make_lot_keyboard(href, screenshots=None, offer_id=None):
+    """
+    Constructs high-conversion lot actions:
+    Row 1: Instant purchase link on FunPay
+    Row 2: Resale marketing post generator + Album viewer
+    """
     kb = types.InlineKeyboardMarkup()
-    buttons = [types.InlineKeyboardButton(text="🔗 Забрать на FunPay", url=href)]
+    kb.row(types.InlineKeyboardButton(text="🔗 Забрать на FunPay", url=href))
     
+    action_row = []
+    if offer_id:
+        action_row.append(types.InlineKeyboardButton(
+            text="📢 Готовый пост в ТГ", 
+            callback_data=f"post:{offer_id}"
+        ))
+
     if screenshots and len(screenshots) > 1 and offer_id:
-        buttons.append(types.InlineKeyboardButton(
-            text=f"📸 Все фото в чат ({len(screenshots)})", 
+        action_row.append(types.InlineKeyboardButton(
+            text=f"📸 Все фото ({len(screenshots)})", 
             callback_data=f"scr:{offer_id}"
         ))
     elif screenshots and len(screenshots) == 1:
-        buttons.append(types.InlineKeyboardButton(text="🖼️ Скриншот (1)", url=screenshots[0]))
+        action_row.append(types.InlineKeyboardButton(text="🖼️ Скриншот (1)", url=screenshots[0]))
         
-    kb.row(*buttons)
+    if action_row:
+        kb.row(*action_row)
     return kb
 
 def get_main_keyboard(current_limit=1):
@@ -58,15 +71,26 @@ def get_main_keyboard(current_limit=1):
     kb.row(btn_settings, btn_status)
     return kb
 
-def get_settings_inline_keyboard(current_limit=1):
+def get_settings_inline_keyboard(current_limit=1, current_budget=420):
     """
-    Inline keyboard allowing user to select default output quantity (1, 2, 3, 5).
+    Inline keyboard allowing user to select output quantity and budget ceiling.
     """
-    kb = types.InlineKeyboardMarkup(row_width=4)
-    buttons = []
+    kb = types.InlineKeyboardMarkup()
+    
+    # Row 1: Quantity Limits
+    qty_row = []
     options = [(1, "1 лот"), (2, "2 лота"), (3, "3 лота"), (5, "5 лотов")]
     for count, label in options:
         text = f"✅ {label}" if count == current_limit else label
-        buttons.append(types.InlineKeyboardButton(text=text, callback_data=f"setlim:{count}"))
-    kb.row(*buttons)
+        qty_row.append(types.InlineKeyboardButton(text=text, callback_data=f"setlim:{count}"))
+    kb.row(*qty_row)
+
+    # Row 2: Budget filters
+    budget_row = []
+    budgets = [(200, "до 200 ₽"), (300, "до 300 ₽"), (420, "Все до 420 ₽")]
+    for b_val, b_label in budgets:
+        b_text = f"✅ {b_label}" if b_val == current_budget else b_label
+        budget_row.append(types.InlineKeyboardButton(text=b_text, callback_data=f"setbdg:{b_val}"))
+    kb.row(*budget_row)
+
     return kb
