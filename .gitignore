@@ -2,3 +2,7 @@ seen_offers.json
 __pycache__/
 *.log
 .vscode/
+*.mp3
+*.mp4
+*.gif
+extracted_frames/
