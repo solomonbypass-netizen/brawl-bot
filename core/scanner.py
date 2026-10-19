@@ -33,6 +33,62 @@ def save_seen_offers(seen_set):
         except Exception as e:
             logger.error(f"Error saving seen cache: {e}")
 
+def deep_inspect_offer(offer_url):
+    """
+    Performs deep inspection on an individual FunPay offer page.
+    Extracts: seller online status, full screenshots list, detailed description.
+    """
+    result = {
+        "online_status": "Неизвестно",
+        "online_badge": "⚖️ Статус неизвестен",
+        "screenshots": [],
+        "detailed_desc": ""
+    }
+    if not offer_url:
+        return result
+
+    try:
+        resp = requests.get(offer_url, headers=HEADERS, cookies=COOKIES, timeout=6)
+        if resp.status_code != 200:
+            return result
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # 1. Seller Online Status
+        user_status_el = soup.find("div", class_="media-user-status")
+        if user_status_el:
+            st = user_status_el.get_text(strip=True)
+            result["online_status"] = st
+            st_lower = st.lower()
+            if "онлайн" in st_lower:
+                result["online_badge"] = "🟢 <b>Продавец онлайн (Быстрая сделка)</b>"
+            elif any(k in st_lower for k in ["минут", "только что"]):
+                result["online_badge"] = f"🟡 <b>Был недавно ({st})</b>"
+            else:
+                result["online_badge"] = f"🔴 <i>{st}</i>"
+
+        # 2. Screenshots (attachments)
+        screenshots = []
+        for a in soup.find_all("a", class_="attachments-thumb"):
+            href = a.get("href")
+            if href and href.startswith("http"):
+                screenshots.append(href)
+        result["screenshots"] = screenshots[:6]  # Up to 6 high-res screenshots
+
+        # 3. Detailed Description
+        for p in soup.find_all("div", class_="param-item"):
+            h5 = p.find("h5")
+            if h5 and "Подробное описание" in h5.get_text():
+                val_div = p.find("div")
+                if val_div:
+                    result["detailed_desc"] = val_div.get_text(strip=True)
+                    break
+
+        return result
+    except Exception as e:
+        logger.warning(f"Deep inspection failed for {offer_url}: {e}")
+        return result
+
 def fetch_lots(min_price=100, max_price=450):
     """
     Fetches and parses FunPay lots with strict validation and liquidity scoring.
