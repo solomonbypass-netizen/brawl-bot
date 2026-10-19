@@ -156,12 +156,19 @@ def handle_generate_ai_video(call):
                 "👉 <i>Готово! Сохраняйте видео в галерею или жмите 'Поделиться' в TikTok / Shorts под любой трендовый звук!</i>"
             )
             with open(video_path, "rb") as vf:
-                bot.send_video(
-                    call.message.chat.id,
-                    video=vf,
-                    caption=caption,
-                    supports_streaming=True
-                )
+                if video_path.endswith(".mp4"):
+                    bot.send_video(
+                        call.message.chat.id,
+                        video=vf,
+                        caption=caption,
+                        supports_streaming=True
+                    )
+                else:
+                    bot.send_animation(
+                        call.message.chat.id,
+                        animation=vf,
+                        caption=caption
+                    )
             try:
                 bot.delete_message(call.message.chat.id, status_msg.message_id)
             except Exception:
