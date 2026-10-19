@@ -43,11 +43,30 @@ def make_lot_keyboard(href, screenshots=None, offer_id=None):
     kb.row(*buttons)
     return kb
 
-
-def get_main_keyboard():
+def get_main_keyboard(current_limit=1):
+    """
+    Creates dynamic main reply keyboard reflecting current user limit.
+    Offers instant 1-tap shortcuts for 1 and 2 lots.
+    """
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    btn_flip = types.KeyboardButton("🚀 Найти окупные лоты прямо сейчас")
-    btn_status = types.KeyboardButton("📊 Статус мониторинга")
-    kb.add(btn_flip)
-    kb.add(btn_status)
+    btn_one = types.KeyboardButton("⚡ 1 лучший лот")
+    btn_two = types.KeyboardButton("🚀 2 лучших лота")
+    btn_settings = types.KeyboardButton(f"⚙️ Лимит: {current_limit} шт.")
+    btn_status = types.KeyboardButton("📊 Статус")
+    
+    kb.row(btn_one, btn_two)
+    kb.row(btn_settings, btn_status)
+    return kb
+
+def get_settings_inline_keyboard(current_limit=1):
+    """
+    Inline keyboard allowing user to select default output quantity (1, 2, 3, 5).
+    """
+    kb = types.InlineKeyboardMarkup(row_width=4)
+    buttons = []
+    options = [(1, "1 лот"), (2, "2 лота"), (3, "3 лота"), (5, "5 лотов")]
+    for count, label in options:
+        text = f"✅ {label}" if count == current_limit else label
+        buttons.append(types.InlineKeyboardButton(text=text, callback_data=f"setlim:{count}"))
+    kb.row(*buttons)
     return kb

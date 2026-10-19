@@ -1,11 +1,15 @@
 import time
 import logging
 import threading
+import io
+import requests
 import telebot
-from core.config import BOT_TOKEN, TARGET_CHAT_ID, CHECK_INTERVAL_SECONDS
+
+from core.config import BOT_TOKEN, TARGET_CHAT_ID, CHECK_INTERVAL_SECONDS, HEADERS, COOKIES
 from core.server import run_http_server
 from core.scanner import load_seen_offers, save_seen_offers, fetch_lots, deep_inspect_offer
-from core.bot_ui import format_gold_message, make_lot_keyboard, get_main_keyboard
+from core.bot_ui import format_gold_message, make_lot_keyboard, get_main_keyboard, get_settings_inline_keyboard
+from core.user_settings import get_user_limit, set_user_limit
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
@@ -22,10 +26,6 @@ bot_stats = {
     "alerts_sent": 0
 }
 seen_offers = load_seen_offers()
-
-import io
-import requests
-from core.config import BOT_TOKEN, TARGET_CHAT_ID, CHECK_INTERVAL_SECONDS, HEADERS, COOKIES
 
 # In-memory cache for offer screenshots so user can request full album
 offer_screenshots_cache = {}
@@ -94,43 +94,93 @@ def handle_view_all_screenshots(call):
         bot.send_message(call.message.chat.id, "Не удалось скачать скриншоты. Открой лот на FunPay по ссылке выше.")
 
 
+# ---------------- CORE SEARCH EXECUTION ----------------
+def execute_deal_search(chat_id, requested_limit=None):
+    current_limit = get_user_limit(chat_id)
+    limit = requested_limit if requested_limit is not None else current_limit
+
+    bot.send_message(
+        chat_id, 
+        f"⚡ <b>Ищу ТОП-{limit} окупных лотов...</b>\n<i>Провожу глубокий аудит страниц и скриншотов...</i>",
+        reply_markup=get_main_keyboard(current_limit)
+    )
+    lots = fetch_lots()
+    lots.sort(key=lambda x: (x["reviews"] >= 10, x["profit"]), reverse=True)
+
+    if not lots:
+        bot.send_message(
+            chat_id, 
+            "Сейчас на FunPay нет лотов, проходящих строгий фильтр окупаемости. Мониторинг ждет новые вбросы!", 
+            reply_markup=get_main_keyboard(current_limit)
+        )
+        return
+
+    selected_lots = lots[:limit]
+    bot.send_message(chat_id, f"✅ Найдено <b>{len(lots)}</b> окупных вариантов. Загружаю <b>ТОП-{len(selected_lots)}</b>:")
+    for lot in selected_lots:
+        send_lot_to_user(chat_id, lot, is_new_alert=False)
+        time.sleep(0.3)
+
 
 # ---------------- TELEGRAM HANDLERS ----------------
 @bot.message_handler(commands=["start", "help"])
 def cmd_start(message):
+    limit = get_user_limit(message.chat.id)
     text = (
-        "👋 <b>Снайпер окупных аккаунтов Brawl Stars активен! [v2 Deep Inspection]</b>\n\n"
+        "👋 <b>Снайпер окупных аккаунтов Brawl Stars активен! [v3 Speed & Quantity Control]</b>\n\n"
         "<b>Критерии жесткого отбора (только реальный профит):</b>\n"
         "• Цена строго <b>100–420 ₽</b> (минимальный риск)\n"
         "• Наличие <b>OG-скинов (2018–2020)</b> или <b>запас гемов/Brawl Pass</b>\n"
         "• Или <b>78+ бравлеров / 14+ праймов</b> за копейки\n"
         "• 🟢 <b>Авто-проверка:</b> продавец онлайн + прикрепленные скриншоты\n"
         "• Чистая окупаемость от <b>+350 ₽ до +1200 ₽</b> со сделки\n\n"
-        "Нажимай кнопку ниже для поиска:"
+        f"⚡ <i>Текущий лимит выдачи: <b>{limit} лот(а)</b></i>\n"
+        "Выбирай нужный вариант на клавиатуре:"
     )
-    bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard())
+    bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard(limit))
 
-@bot.message_handler(func=lambda m: m.text and any(k in m.text.lower() for k in ["найти", "окуп", "лоты", "горяч", "флип"]))
-def handle_find_deals(message):
-    bot.send_message(message.chat.id, "🔍 Сканирую FunPay и провожу глубокий аудит страниц продавцов...")
-    lots = fetch_lots()
-    lots.sort(key=lambda x: (x["reviews"] >= 10, x["profit"]), reverse=True)
+@bot.message_handler(func=lambda m: m.text and "1 лучший лот" in m.text.lower())
+def handle_top_1(message):
+    execute_deal_search(message.chat.id, requested_limit=1)
 
-    if not lots:
-        bot.send_message(
-            message.chat.id, 
-            "Сейчас на FunPay нет лотов, проходящих строгий фильтр окупаемости. Мониторинг ждет новые вбросы!", 
-            reply_markup=get_main_keyboard()
+@bot.message_handler(func=lambda m: m.text and "2 лучших лота" in m.text.lower())
+def handle_top_2(message):
+    execute_deal_search(message.chat.id, requested_limit=2)
+
+@bot.message_handler(func=lambda m: m.text and ("лимит" in m.text.lower() or "настройк" in m.text.lower()))
+def handle_settings_menu(message):
+    limit = get_user_limit(message.chat.id)
+    text = (
+        "⚙️ <b>Настройка количества лотов при выдаче:</b>\n\n"
+        f"Сейчас при поиске выдается: <b>{limit} шт.</b>\n"
+        "Выберите, сколько лучших вариантов загружать:"
+    )
+    bot.send_message(message.chat.id, text, reply_markup=get_settings_inline_keyboard(limit))
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("setlim:"))
+def handle_limit_selection(call):
+    new_limit = int(call.data.split(":")[1])
+    saved = set_user_limit(call.message.chat.id, new_limit)
+    bot.answer_callback_query(call.id, f"✅ Лимит выдачи: {saved} шт.")
+    
+    try:
+        bot.edit_message_reply_markup(
+            call.message.chat.id,
+            call.message.message_id,
+            reply_markup=get_settings_inline_keyboard(saved)
         )
-        return
+    except Exception:
+        pass
 
-    bot.send_message(message.chat.id, f"✅ Отобрано <b>{len(lots)}</b> окупных вариантов. Загружаю ТОП-3 со скриншотами:")
-    for lot in lots[:3]:
-        send_lot_to_user(message.chat.id, lot, is_new_alert=False)
-        time.sleep(0.5)
+    bot.send_message(
+        call.message.chat.id,
+        f"👌 Настройка сохранена! Теперь при поиске бот покажет <b>ТОП-{saved}</b> лотов.",
+        reply_markup=get_main_keyboard(saved)
+    )
 
 @bot.message_handler(func=lambda m: m.text and "статус" in m.text.lower())
 def handle_status(message):
+    limit = get_user_limit(message.chat.id)
     uptime_sec = int(time.time() - bot_stats["start_time"])
     hours = uptime_sec // 3600
     minutes = (uptime_sec % 3600) // 60
@@ -142,14 +192,16 @@ def handle_status(message):
         f"🔄 <b>Проведено сканов:</b> {bot_stats['scans_count']}\n"
         f"🕒 <b>Крайний скан:</b> {bot_stats['last_scan_time']}\n"
         f"📦 <b>База известных лотов:</b> {len(seen_offers)} шт.\n"
-        f"🔔 <b>Отправлено новых алертов:</b> {bot_stats['alerts_sent']}\n\n"
+        f"🔔 <b>Отправлено новых алертов:</b> {bot_stats['alerts_sent']}\n"
+        f"⚙️ <b>Твой лимит выдачи:</b> {limit} шт.\n\n"
         "🎯 <i>Глубокий аудит страниц офферов и скриншотов активен.</i>"
     )
-    bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard())
+    bot.send_message(message.chat.id, text, reply_markup=get_main_keyboard(limit))
 
 @bot.message_handler(func=lambda m: True)
 def handle_fallback(message):
-    handle_find_deals(message)
+    limit = get_user_limit(message.chat.id)
+    execute_deal_search(message.chat.id, requested_limit=limit)
 
 # ---------------- BACKGROUND SCANNER ----------------
 def background_scanner_loop():
@@ -196,7 +248,7 @@ def background_scanner_loop():
 
 # ---------------- MAIN RUNNER ----------------
 def start_app():
-    logger.info("Initializing Modular FunPay Sniper Architecture with Deep Inspection...")
+    logger.info("Initializing Modular FunPay Sniper Architecture with Deep Inspection & Custom Limit...")
 
     http_thread = threading.Thread(target=run_http_server, daemon=True)
     http_thread.start()
