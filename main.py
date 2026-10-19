@@ -23,12 +23,15 @@ bot_stats = {
 }
 seen_offers = load_seen_offers()
 
+import io
+import requests
+from core.config import BOT_TOKEN, TARGET_CHAT_ID, CHECK_INTERVAL_SECONDS, HEADERS, COOKIES
+
 def send_lot_to_user(chat_id, lot, is_new_alert=False):
     """
     Sends lot with deep inspection details (screenshots, online badge).
-    Gracefully falls back to text if Telegram cannot fetch the image.
+    Downloads image stream directly to bypass Cloudflare/CDN blocking of Telegram bots.
     """
-    # 1. Deep inspect candidate
     deep_data = deep_inspect_offer(lot.get("href"))
     lot.update(deep_data)
 
@@ -38,17 +41,21 @@ def send_lot_to_user(chat_id, lot, is_new_alert=False):
     screenshots = lot.get("screenshots", [])
     sent = False
 
-    # 2. Try sending with photo if available
+    # Try downloading image and streaming bytes directly to Telegram
     if screenshots:
         try:
-            bot.send_photo(chat_id, photo=screenshots[0], caption=msg, reply_markup=kb)
-            sent = True
+            r = requests.get(screenshots[0], headers=HEADERS, cookies=COOKIES, timeout=5)
+            if r.status_code == 200 and len(r.content) > 1000:
+                photo_stream = io.BytesIO(r.content)
+                photo_stream.name = "screenshot.jpg"
+                bot.send_photo(chat_id, photo=photo_stream, caption=msg, reply_markup=kb)
+                sent = True
         except Exception as e:
-            logger.warning(f"Could not send photo directly ({e}), sending text fallback...")
+            logger.warning(f"Direct photo stream upload failed ({e}), falling back to text...")
 
-    # 3. Fallback to clean HTML text
     if not sent:
         bot.send_message(chat_id, msg, reply_markup=kb)
+
 
 # ---------------- TELEGRAM HANDLERS ----------------
 @bot.message_handler(commands=["start", "help"])
