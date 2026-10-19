@@ -16,6 +16,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         pass
 
 def run_http_server():
-    server = HTTPServer(("0.0.0.0", PORT), HealthCheckHandler)
+    server = HTTPServer(("", PORT), HealthCheckHandler)
     logger.info(f"Health-check HTTP server active on port {PORT}")
     server.serve_forever()
+
