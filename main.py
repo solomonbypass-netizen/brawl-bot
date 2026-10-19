@@ -27,6 +27,9 @@ import io
 import requests
 from core.config import BOT_TOKEN, TARGET_CHAT_ID, CHECK_INTERVAL_SECONDS, HEADERS, COOKIES
 
+# In-memory cache for offer screenshots so user can request full album
+offer_screenshots_cache = {}
+
 def send_lot_to_user(chat_id, lot, is_new_alert=False):
     """
     Sends lot with deep inspection details (screenshots, online badge).
@@ -35,10 +38,14 @@ def send_lot_to_user(chat_id, lot, is_new_alert=False):
     deep_data = deep_inspect_offer(lot.get("href"))
     lot.update(deep_data)
 
-    msg = format_gold_message(lot, is_new_alert=is_new_alert)
-    kb = make_lot_keyboard(lot["href"], lot.get("screenshots"))
-
+    offer_id = lot.get("offer_id", "")
     screenshots = lot.get("screenshots", [])
+    if offer_id and screenshots:
+        offer_screenshots_cache[str(offer_id)] = screenshots
+
+    msg = format_gold_message(lot, is_new_alert=is_new_alert)
+    kb = make_lot_keyboard(lot["href"], screenshots=screenshots, offer_id=offer_id)
+
     sent = False
 
     # Try downloading image and streaming bytes directly to Telegram
@@ -55,6 +62,37 @@ def send_lot_to_user(chat_id, lot, is_new_alert=False):
 
     if not sent:
         bot.send_message(chat_id, msg, reply_markup=kb)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("scr:"))
+def handle_view_all_screenshots(call):
+    offer_id = call.data.split(":")[1]
+    screenshots = offer_screenshots_cache.get(offer_id, [])
+
+    if not screenshots:
+        bot.answer_callback_query(call.id, "Скриншоты устарели или не найдены в кэше.", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id, f"Отправляю все {len(screenshots)} скриншотов в чат...")
+
+    media_group = []
+    for i, img_url in enumerate(screenshots[:8]):
+        try:
+            r = requests.get(img_url, headers=HEADERS, cookies=COOKIES, timeout=4)
+            if r.status_code == 200 and len(r.content) > 1000:
+                stream = io.BytesIO(r.content)
+                stream.name = f"screen_{i}.jpg"
+                caption = f"📸 Скриншот {i+1} из {len(screenshots)}" if i == 0 else None
+                media_group.append(telebot.types.InputMediaPhoto(media=stream, caption=caption))
+        except Exception as e:
+            logger.warning(f"Failed to fetch screenshot {img_url}: {e}")
+
+    if len(media_group) >= 2:
+        bot.send_media_group(call.message.chat.id, media=media_group)
+    elif len(media_group) == 1:
+        bot.send_photo(call.message.chat.id, photo=media_group[0].media)
+    else:
+        bot.send_message(call.message.chat.id, "Не удалось скачать скриншоты. Открой лот на FunPay по ссылке выше.")
+
 
 
 # ---------------- TELEGRAM HANDLERS ----------------

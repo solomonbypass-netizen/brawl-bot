@@ -28,13 +28,21 @@ def format_gold_message(lot, is_new_alert=False):
     )
     return msg
 
-def make_lot_keyboard(href, screenshots=None):
+def make_lot_keyboard(href, screenshots=None, offer_id=None):
     kb = types.InlineKeyboardMarkup()
     buttons = [types.InlineKeyboardButton(text="🔗 Забрать на FunPay", url=href)]
-    if screenshots and len(screenshots) > 0:
-        buttons.append(types.InlineKeyboardButton(text=f"🖼️ Скриншоты ({len(screenshots)})", url=screenshots[0]))
+    
+    if screenshots and len(screenshots) > 1 and offer_id:
+        buttons.append(types.InlineKeyboardButton(
+            text=f"📸 Все фото в чат ({len(screenshots)})", 
+            callback_data=f"scr:{offer_id}"
+        ))
+    elif screenshots and len(screenshots) == 1:
+        buttons.append(types.InlineKeyboardButton(text="🖼️ Скриншот (1)", url=screenshots[0]))
+        
     kb.row(*buttons)
     return kb
+
 
 def get_main_keyboard():
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
