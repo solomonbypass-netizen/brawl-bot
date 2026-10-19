@@ -3,6 +3,7 @@ __pycache__/
 *.log
 .vscode/
 *.mp3
+!assets/audio/*.mp3
 *.mp4
 *.gif
 extracted_frames/
