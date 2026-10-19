@@ -11,6 +11,7 @@ from core.server import run_http_server
 from core.scanner import load_seen_offers, save_seen_offers, fetch_lots, deep_inspect_offer
 from core.bot_ui import format_gold_message, make_lot_keyboard, get_main_keyboard, get_settings_inline_keyboard
 from core.post_generator import generate_telegram_resale_post
+from core.promo_generator import generate_viral_promo_pack
 from core.user_settings import (
     get_user_limit, set_user_limit,
     get_user_contact, set_user_contact,
@@ -124,6 +125,44 @@ def handle_generate_post(call):
         f"💡 <i>Контакт: <b>{contact}</b>. Изменить: <code>/contact @твой_юзер</code></i>"
     )
     bot.send_message(call.message.chat.id, response_msg, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("promo:"))
+def handle_generate_promo_pack(call):
+    offer_id = call.data.split(":")[1]
+    lot = offers_cache.get(offer_id)
+
+    if not lot:
+        bot.answer_callback_query(call.id, "Информация об этом лоте устарела. Запустите новый поиск.", show_alert=True)
+        return
+
+    contact = get_user_contact(call.message.chat.id)
+    promo = generate_viral_promo_pack(lot, seller_contact=contact)
+
+    bot.answer_callback_query(call.id, "🎬 Промо-пак для Shorts/TikTok готов!")
+
+    hook = html.escape(promo["hook_text"])
+    script = html.escape(promo["voice_script"])
+    caption = html.escape(promo["caption_text"])
+    sound = promo["sound_recommendation"]
+    fmt = promo["video_format"]
+
+    msg = (
+        "🎬 <b>ВИРУСНЫЙ ПРОМО-ПАК ДЛЯ TIKTOK / SHORTS / REELS:</b>\n"
+        "<i>Используйте этот набор, чтобы смонтировать видео за 30 секунд и перелить трафик в ТГК!</i>\n\n"
+        f"📌 <b>1. ТЕКСТ НА 1-Й КАДР (Хук для удержания):</b>\n"
+        f"<i>(Нажмите, чтобы скопировать)</i>\n"
+        f"<pre>{hook}</pre>\n\n"
+        f"🎙️ <b>2. СЦЕНАРИЙ ОЗВУЧКИ (10-12 секунд):</b>\n"
+        f"<i>(Озвучьте своим голосом или роботом в CapCut)</i>\n"
+        f"<pre>{script}</pre>\n\n"
+        f"🎵 <b>3. РЕКОМЕНДАЦИЯ ПО МОНТАЖУ:</b>\n"
+        f"• {sound}\n"
+        f"• {fmt}\n\n"
+        f"📝 <b>4. ОПИСАНИЕ И ВИРУСНЫЕ ХЭШТЕГИ:</b>\n"
+        f"<pre>{caption}</pre>\n\n"
+        f"💡 <i>Скриншоты аккаунта для видео можно выгрузить кнопкой «Все фото» выше!</i>"
+    )
+    bot.send_message(call.message.chat.id, msg, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("setlim:"))
 def handle_limit_selection(call):

@@ -40,6 +40,7 @@ def make_lot_keyboard(href, screenshots=None, offer_id=None):
     Constructs high-conversion lot actions:
     Row 1: Instant purchase link on FunPay
     Row 2: Resale marketing post generator + Album viewer
+    Row 3: Viral Promo Pack for Shorts/TikTok
     """
     kb = types.InlineKeyboardMarkup()
     kb.row(types.InlineKeyboardButton(text="🔗 Забрать на FunPay", url=href))
@@ -47,7 +48,7 @@ def make_lot_keyboard(href, screenshots=None, offer_id=None):
     action_row = []
     if offer_id:
         action_row.append(types.InlineKeyboardButton(
-            text="📢 Готовый пост в ТГ", 
+            text="📢 Пост в ТГ", 
             callback_data=f"post:{offer_id}"
         ))
 
@@ -61,6 +62,13 @@ def make_lot_keyboard(href, screenshots=None, offer_id=None):
         
     if action_row:
         kb.row(*action_row)
+
+    if offer_id:
+        kb.row(types.InlineKeyboardButton(
+            text="🎬 Промо-пак (Shorts / TikTok)",
+            callback_data=f"promo:{offer_id}"
+        ))
+
     return kb
 
 def get_main_keyboard(current_limit=1):
