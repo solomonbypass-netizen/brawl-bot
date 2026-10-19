@@ -13,13 +13,20 @@ def format_gold_message(lot, is_new_alert=False):
     screenshots_cnt = len(lot.get("screenshots", []))
     screens_line = f"🖼️ <b>Скриншотов:</b> {screenshots_cnt} шт.\n" if screenshots_cnt > 0 else ""
 
+    roi = lot.get("roi_percent", 0)
+    roi_badge = f" (ROI: <b>+{roi}%</b>)" if roi > 0 else ""
+    
+    breakdown = lot.get("valuation_breakdown", "")
+    breakdown_block = f"📊 <b>Калькуляция Оценщика:</b>\n<i>{breakdown}</i>\n\n" if breakdown else ""
+
     msg = (
         f"{title}\n\n"
-        f"🎯 <b>ПОЧЕМУ ЭТО ОКУП:</b>\n"
+        f"🎯 <b>ПОЧЕМУ ЭТО ОКУП (Анализ рынка):</b>\n"
         f"{triggers_text}\n\n"
         f"💵 <b>Цена на FunPay:</b> <code>{lot['price']:g} ₽</code>\n"
-        f"📈 <b>Реальная продажа в ТГ:</b> ~<code>{lot['est_tg_price']} ₽</code>\n"
-        f"🟢 <b>Твой чистый профит:</b> <b>+{lot['profit']} ₽</b>\n\n"
+        f"📈 <b>Справедливая цена в ТГ:</b> ~<code>{lot['est_tg_price']} ₽</code>\n"
+        f"🟢 <b>Твой чистый профит:</b> <b>+{lot['profit']} ₽</b>{roi_badge}\n\n"
+        f"{breakdown_block}"
         f"🏆 <b>Кубков:</b> <b>{lot['trophies']:,}</b> | 👤 <b>Бравлеров:</b> <b>{lot['brawlers']}</b> | ⚡ <b>Праймов:</b> <b>{lot['primes']}</b>\n"
         f"{screens_line}"
         f"👤 <b>Продавец:</b> {lot['seller']} (⭐ <b>{lot['reviews']}</b> отзывов){online_line}\n"
