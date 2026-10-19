@@ -12,6 +12,7 @@ from core.scanner import load_seen_offers, save_seen_offers, fetch_lots, deep_in
 from core.bot_ui import format_gold_message, make_lot_keyboard, get_main_keyboard, get_settings_inline_keyboard
 from core.post_generator import generate_telegram_resale_post
 from core.promo_generator import generate_viral_promo_pack
+from core.video_maker import generate_ai_video_clip
 from core.user_settings import (
     get_user_limit, set_user_limit,
     get_user_contact, set_user_contact,
@@ -125,6 +126,57 @@ def handle_generate_post(call):
         f"💡 <i>Контакт: <b>{contact}</b>. Изменить: <code>/contact @твой_юзер</code></i>"
     )
     bot.send_message(call.message.chat.id, response_msg, parse_mode="HTML")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("video:"))
+def handle_generate_ai_video(call):
+    offer_id = call.data.split(":")[1]
+    lot = offers_cache.get(offer_id)
+
+    if not lot:
+        bot.answer_callback_query(call.id, "Информация об этом лоте устарела. Запустите новый поиск.", show_alert=True)
+        return
+
+    bot.answer_callback_query(call.id, "🤖 ИИ начал монтаж видео 9:16...")
+    status_msg = bot.send_message(
+        call.message.chat.id, 
+        "⏳ <b>ИИ монтирует ролик для TikTok / Shorts...</b>\n"
+        "<i>Накладываю скриншоты, анимированные хуки, плашки с ценой и призывом в ТГК (~3-4 сек)...</i>"
+    )
+
+    contact = get_user_contact(call.message.chat.id)
+    video_path = None
+    try:
+        video_path = generate_ai_video_clip(lot, seller_contact=contact)
+        if video_path and os.path.exists(video_path):
+            caption = (
+                "🎬 <b>ГОТОВЫЙ РОЛИК ОТ ИИ (9:16):</b>\n"
+                f"• Формат: <b>Shorts / TikTok / Reels</b>\n"
+                f"• Цена оффера: <code>{lot['price']:g} ₽</code> ──> <b>{lot.get('est_tg_price', 650)} ₽</b>\n"
+                f"• Контакт в видео: <b>{contact}</b>\n\n"
+                "👉 <i>Готово! Сохраняйте видео в галерею или жмите 'Поделиться' в TikTok / Shorts под любой трендовый звук!</i>"
+            )
+            with open(video_path, "rb") as vf:
+                bot.send_video(
+                    call.message.chat.id,
+                    video=vf,
+                    caption=caption,
+                    supports_streaming=True
+                )
+            try:
+                bot.delete_message(call.message.chat.id, status_msg.message_id)
+            except Exception:
+                pass
+        else:
+            bot.send_message(call.message.chat.id, "❌ Не удалось сгенерировать видеофайл.")
+    except Exception as e:
+        logger.error(f"Error in handle_generate_ai_video: {e}")
+        bot.send_message(call.message.chat.id, f"❌ Ошибка монтажа видео: {e}")
+    finally:
+        if video_path and os.path.exists(video_path):
+            try:
+                os.remove(video_path)
+            except Exception:
+                pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("promo:"))
 def handle_generate_promo_pack(call):
