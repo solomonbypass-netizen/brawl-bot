@@ -1,6 +1,9 @@
+import os
+
 # Telegram Bot Token & Admin Chat (Injected securely via Environment Variables)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 TARGET_CHAT_ID = int(os.environ.get("TARGET_CHAT_ID", "6985905211"))
+
 
 
 # FunPay Target URL & Headers
