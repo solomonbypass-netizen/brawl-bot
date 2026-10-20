@@ -2,8 +2,10 @@ seen_offers.json
 __pycache__/
 *.log
 .vscode/
+node_modules/
 *.mp3
 !assets/audio/*.mp3
+!remotion-brawl-promo/public/audio/*.mp3
 *.mp4
 *.gif
 extracted_frames/

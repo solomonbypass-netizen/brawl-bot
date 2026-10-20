@@ -1,0 +1,19 @@
+{
+  "name": "remotion-brawl-promo",
+  "version": "1.0.0",
+  "description": "Apple/Linear style Remotion vertical promo video for Brawl Stars Telegram channel",
+  "scripts": {
+    "start": "remotion preview",
+    "build": "remotion render src/index.ts BrawlStarsPromo out/video.mp4"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "remotion": "^4.0.0",
+    "@remotion/cli": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "typescript": "^5.0.0"
+  }
+}
