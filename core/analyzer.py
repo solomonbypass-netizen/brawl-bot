@@ -4,7 +4,7 @@ from core.valuation import calculate_brawl_fair_valuation, extract_real_gems
 OG_SKINS = [
     "звездная шелли", "star shelly", "шелли 2018", "2018", "2019", "корсар кольт",
     "рикошет", "вирус 8-бит", "вирус", "ведьма шелли", "оборотень леон",
-    "торговец гейл", "паладин вольт", "майк портье", "хэллоуин", "олд акк", "трикси колетт"
+    "торговец гейл", "паладин вольт", "майк портье", "хэллоуин", "олд акк", "трикси колетт", "челленджер кольт"
 ]
 
 SPAM_KEYWORDS = [
@@ -53,11 +53,17 @@ def extract_real_gem_balance(desc_lower):
 
 def analyze_lot_liquidity(lot_dict):
     """
-    Delegates to the Valuation Guru engine for realistic multi-factor market pricing.
+    Delegates to the Valuation Guru engine for realistic multi-factor market pricing (Steps 1-3).
     Returns: (is_approved, triggers, est_tg_price, profit)
-    Enriches lot_dict with 'roi_percent' and 'valuation_breakdown'.
+    Enriches lot_dict with 'tier', 'player_tag', 'brawlify_url', 'brawltime_url', 'site_score', 'key_values', 'verdict', 'est_tg_price', 'profit', 'roi_percent'.
     """
-    is_approved, est_tg_price, profit, roi_percent, triggers, breakdown = calculate_brawl_fair_valuation(lot_dict)
+    is_approved, est_tg_price, profit, roi_percent, triggers, breakdown, evaluation_meta = calculate_brawl_fair_valuation(lot_dict)
     lot_dict["roi_percent"] = roi_percent
     lot_dict["valuation_breakdown"] = breakdown
+    lot_dict["est_tg_price"] = est_tg_price
+    lot_dict["profit"] = profit
+    
+    if evaluation_meta:
+        lot_dict.update(evaluation_meta)
+        
     return is_approved, triggers, est_tg_price, profit

@@ -1,37 +1,60 @@
 from telebot import types
 
 def format_gold_message(lot, is_new_alert=False):
-    title = "🚨 <b>НАЙДЕН ОКУПНОЙ АККАУНТ НА FUNPAY!</b>" if is_new_alert else "💰 <b>ОКУПНОЙ ЛОТ ПОД БЫСТРЫЙ ФЛИП:</b>"
-    mail_badge = "🟢 <b>Родная почта (Firstmail)</b>" if lot.get("has_firstmail") else "🟡 <b>Почту уточнять у продавца</b>"
+    """
+    Constructs the exact 5-point evaluation report card for HIGH and GOD TIER accounts:
+    1. Found ID & Direct link to Brawlify / Brawl Time Ninja
+    2. Ready valuation / Account score from the site
+    3. Marketplace price vs Real fair market value
+    4. Key asset value (Exclusive skins / Hypercharges / Rank)
+    5. Detailed analytical verdict on why this lot must be bought
+    """
+    tier = lot.get("tier", "HIGH TIER")
+    if "GOD" in tier:
+        header = "👑 <b>[GOD TIER / SNIPE TARGET] 🎯 МГНОВЕННЫЙ ВЫКУП!</b>"
+    else:
+        header = "💎 <b>[HIGH TIER] 🔥 ТОПОВЫЙ ЛОТ ПОД ВЫКУП</b>"
+
+    if is_new_alert:
+        header = f"🚨 <b>НОВЫЙ ОКУПНОЙ ЛОТ НА FUNPAY!</b>\n{header}"
+
+    player_tag = lot.get("player_tag", "Скрыт продавцом (#)")
+    brawlify_url = lot.get("brawlify_url", f"https://brawlify.com/stats/search?q={lot.get('seller', '')}")
+    brawltime_url = lot.get("brawltime_url")
     
-    triggers = lot.get("triggers", [])
-    triggers_text = "\n".join([f"• {t}" for t in triggers])
+    links_part = f'<a href="{brawlify_url}">Brawlify</a>'
+    if brawltime_url:
+        links_part += f' | <a href="{brawltime_url}">Brawl Time Ninja</a>'
 
-    online_badge = lot.get("online_badge", "")
-    online_line = f"\n{online_badge}" if online_badge else ""
-
-    screenshots_cnt = len(lot.get("screenshots", []))
-    screens_line = f"🖼️ <b>Скриншотов:</b> {screenshots_cnt} шт.\n" if screenshots_cnt > 0 else ""
-
+    site_score = lot.get("site_score", "Account Value: Авто-анализ по базе")
     roi = lot.get("roi_percent", 0)
-    roi_badge = f" (ROI: <b>+{roi}%</b>)" if roi > 0 else ""
-    
-    breakdown = lot.get("valuation_breakdown", "")
-    breakdown_block = f"📊 <b>Калькуляция Оценщика:</b>\n<i>{breakdown}</i>\n\n" if breakdown else ""
+    key_values = lot.get("key_values", "• Базовый боевой ростер")
+    verdict = lot.get("verdict", "Высокая ликвидность для безопасного флипа.")
+
+    mail_badge = "🟢 Родная почта (Firstmail)" if lot.get("has_firstmail") else "🟡 Почту уточнять у продавца"
+    online_badge = lot.get("online_badge", "")
+    online_line = f" | {online_badge}" if online_badge else ""
+
+    est_tg_price = lot.get("est_tg_price", round(lot.get("price", 200) * 2.2))
+    profit = lot.get("profit", est_tg_price - lot.get("price", 0))
 
     msg = (
-        f"{title}\n\n"
-        f"🎯 <b>ПОЧЕМУ ЭТО ОКУП (Анализ рынка):</b>\n"
-        f"{triggers_text}\n\n"
+        f"{header}\n\n"
+        f"1️⃣ <b>АЙДИ ИГРОКА & ПРОФИЛЬ:</b>\n"
+        f"Тег: <code>{player_tag}</code>\n"
+        f"🌐 Ссылки: {links_part}\n\n"
+        f"2️⃣ <b>ОЦЕНКА СТОИМОСТИ САЙТА:</b>\n"
+        f"⭐ <i>{site_score}</i>\n\n"
+        f"3️⃣ <b>ЦЕНА VS РЕАЛЬНАЯ СТОИМОСТЬ:</b>\n"
         f"💵 <b>Цена на FunPay:</b> <code>{lot['price']:g} ₽</code>\n"
-        f"📈 <b>Справедливая цена в ТГ:</b> ~<code>{lot['est_tg_price']} ₽</code>\n"
-        f"🟢 <b>Твой чистый профит:</b> <b>+{lot['profit']} ₽</b>{roi_badge}\n\n"
-        f"{breakdown_block}"
-        f"🏆 <b>Кубков:</b> <b>{lot['trophies']:,}</b> | 👤 <b>Бравлеров:</b> <b>{lot['brawlers']}</b> | ⚡ <b>Праймов:</b> <b>{lot['primes']}</b>\n"
-        f"{screens_line}"
-        f"👤 <b>Продавец:</b> {lot['seller']} (⭐ <b>{lot['reviews']}</b> отзывов){online_line}\n"
-        f"{mail_badge}\n\n"
-        f"📝 <i>{lot['desc'][:115]}...</i>"
+        f"📈 <b>Реальная рыночная цена:</b> ~<code>{est_tg_price} ₽</code>\n"
+        f"🟢 <b>Чистый профит:</b> <b>+{profit} ₽</b> (ROI: <b>+{roi}%</b>)\n\n"
+        f"4️⃣ <b>ГЛАВНАЯ ЦЕННОСТЬ АККАУНТА:</b>\n"
+        f"{key_values}\n\n"
+        f"5️⃣ <b>ВЕРДИКТ (ПОЧЕМУ НАДО КУПИТЬ):</b>\n"
+        f"{verdict}\n\n"
+        f"🔒 <b>Сделка:</b> {mail_badge}\n"
+        f"👤 <b>Продавец:</b> {lot['seller']} (⭐ <b>{lot['reviews']}</b> отзывов){online_line}"
     )
     return msg
 
