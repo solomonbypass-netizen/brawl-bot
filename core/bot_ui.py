@@ -18,13 +18,14 @@ def format_gold_message(lot, is_new_alert=False):
     if is_new_alert:
         header = f"🚨 <b>НОВЫЙ ОКУПНОЙ ЛОТ НА FUNPAY!</b>\n{header}"
 
-    player_tag = lot.get("player_tag", "Скрыт продавцом (#)")
-    brawlify_url = lot.get("brawlify_url", f"https://brawlify.com/stats/search?q={lot.get('seller', '')}")
-    brawltime_url = lot.get("brawltime_url")
+    player_tag = lot.get("player_tag", "Скрыт на фото и в описании")
+    brawlify_url = lot.get("brawlify_url") or "https://brawlify.com"
+    brawltime_url = lot.get("brawltime_url") or "https://brawltime.ninja"
     
-    links_part = f'<a href="{brawlify_url}">Brawlify</a>'
-    if brawltime_url:
-        links_part += f' | <a href="{brawltime_url}">Brawl Time Ninja</a>'
+    links_block = (
+        f"• <b>Brawlify:</b> <a href=\"{brawlify_url}\">{brawlify_url}</a>\n"
+        f"• <b>Brawl Time Ninja:</b> <a href=\"{brawltime_url}\">{brawltime_url}</a>"
+    )
 
     site_score = lot.get("site_score", "Account Value: Авто-анализ по базе")
     roi = lot.get("roi_percent", 0)
@@ -40,9 +41,9 @@ def format_gold_message(lot, is_new_alert=False):
 
     msg = (
         f"{header}\n\n"
-        f"1️⃣ <b>АЙДИ ИГРОКА & ПРОФИЛЬ:</b>\n"
-        f"Тег: <code>{player_tag}</code>\n"
-        f"🌐 Ссылки: {links_part}\n\n"
+        f"1️⃣ <b>АЙДИ ИГРОКА & ССЫЛКИ НА СТАТИСТИКУ:</b>\n"
+        f"• <b>Тег игрока:</b> <code>{player_tag}</code>\n"
+        f"{links_block}\n\n"
         f"2️⃣ <b>ОЦЕНКА СТОИМОСТИ САЙТА:</b>\n"
         f"⭐ <i>{site_score}</i>\n\n"
         f"3️⃣ <b>ЦЕНА VS РЕАЛЬНАЯ СТОИМОСТЬ:</b>\n"
@@ -58,15 +59,25 @@ def format_gold_message(lot, is_new_alert=False):
     )
     return msg
 
-def make_lot_keyboard(href, screenshots=None, offer_id=None):
+def make_lot_keyboard(href, screenshots=None, offer_id=None, brawlify_url=None, brawltime_url=None):
     """
     Constructs high-conversion lot actions:
     Row 1: Instant purchase link on FunPay
-    Row 2: Resale marketing post generator + Album viewer
-    Row 3: AI Video Montage + Viral Text Promo Pack
+    Row 2: Instant profile statistics links (Brawlify + Brawl Time Ninja)
+    Row 3: Resale marketing post generator + Album viewer
+    Row 4: AI Video Montage + Viral Text Promo Pack
     """
     kb = types.InlineKeyboardMarkup()
     kb.row(types.InlineKeyboardButton(text="🔗 Забрать на FunPay", url=href))
+
+    # Row 2: Instant Profile Stats buttons!
+    profile_row = []
+    if brawlify_url and "http" in brawlify_url:
+        profile_row.append(types.InlineKeyboardButton(text="🌐 Brawlify Профиль", url=brawlify_url))
+    if brawltime_url and "http" in brawltime_url:
+        profile_row.append(types.InlineKeyboardButton(text="⚔️ Brawl Time Ninja", url=brawltime_url))
+    if profile_row:
+        kb.row(*profile_row)
     
     action_row = []
     if offer_id:

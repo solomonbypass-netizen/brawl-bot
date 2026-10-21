@@ -48,6 +48,13 @@ def send_lot_to_user(chat_id, lot, is_new_alert=False):
     deep_data = deep_inspect_offer(lot.get("href"))
     lot.update(deep_data)
 
+    # Re-evaluate with deep OCR and detailed description!
+    from core.analyzer import analyze_lot_liquidity
+    is_liquid, triggers, est_tg_price, profit = analyze_lot_liquidity(lot)
+    if not is_liquid:
+        logger.info(f"Lot {lot.get('offer_id')} disqualified after deep OCR inspection (LOW TIER).")
+        return
+
     offer_id = str(lot.get("offer_id", ""))
     screenshots = lot.get("screenshots", [])
     if offer_id:
@@ -56,7 +63,13 @@ def send_lot_to_user(chat_id, lot, is_new_alert=False):
             offer_screenshots_cache[offer_id] = screenshots
 
     msg = format_gold_message(lot, is_new_alert=is_new_alert)
-    kb = make_lot_keyboard(lot["href"], screenshots=screenshots, offer_id=offer_id)
+    kb = make_lot_keyboard(
+        lot["href"], 
+        screenshots=screenshots, 
+        offer_id=offer_id,
+        brawlify_url=lot.get("brawlify_url"),
+        brawltime_url=lot.get("brawltime_url")
+    )
 
     sent = False
 

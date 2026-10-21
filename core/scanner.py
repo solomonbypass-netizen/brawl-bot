@@ -84,6 +84,26 @@ def deep_inspect_offer(offer_url):
                     result["detailed_desc"] = val_div.get_text(strip=True)
                     break
 
+        # 4. OCR on screenshots to identify in-game Player Tag (#), nickname, trophies
+        if screenshots:
+            try:
+                img_resp = requests.get(screenshots[0], headers=HEADERS, cookies=COOKIES, timeout=6)
+                if img_resp.status_code == 200 and len(img_resp.content) > 1000:
+                    from core.ocr_extractor import extract_brawl_meta_from_image
+                    ocr_tag, ocr_nick, ocr_trophies, ocr_text = extract_brawl_meta_from_image(img_resp.content)
+                    if ocr_tag:
+                        result["ocr_tag"] = ocr_tag
+                        logger.info(f"[{offer_url}] OCR successfully identified Player Tag: {ocr_tag}")
+                    if ocr_nick:
+                        result["ocr_nick"] = ocr_nick
+                        logger.info(f"[{offer_url}] OCR identified in-game Nickname: {ocr_nick}")
+                    if ocr_trophies:
+                        result["ocr_trophies"] = ocr_trophies
+                    if ocr_text:
+                        result["ocr_text"] = ocr_text
+            except Exception as ocr_err:
+                logger.warning(f"Screenshot OCR inspection failed: {ocr_err}")
+
         return result
     except Exception as e:
         logger.warning(f"Deep inspection failed for {offer_url}: {e}")

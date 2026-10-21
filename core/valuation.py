@@ -92,35 +92,58 @@ def extract_real_gems(desc_lower):
             return val
     return 0
 
-def extract_player_tag_and_profile(desc, detailed_desc=""):
+def extract_player_tag_and_profile(desc, detailed_desc="", ocr_tag=None, ocr_nick=None, ocr_text=""):
     """
     Step 1: Identifies Player Tag (#) or player nickname for verification.
+    Priority:
+      1. Direct tag detected via OCR on screenshot (e.g. #2VP9GUPPU2)
+      2. Direct tag in lot description
+      3. Tag found in full OCR text of screenshot
+      4. Tag labeled with words ID/TAG in text
+      5. Nickname from OCR or text (generates search links)
     Returns: (player_tag, brawlify_url, brawltime_url, is_verified_tag)
     """
     full_text = f"{desc} {detailed_desc}".strip()
     
-    # 1. Direct tag starting with #
+    # 1. Direct tag detected via OCR on screenshot!
+    if ocr_tag:
+        clean = ocr_tag.lstrip("#")
+        return ocr_tag, f"https://brawlify.com/stats/profile/{clean}", f"https://brawltime.ninja/profile/{clean}", True
+
+    # 2. Direct tag starting with # in text
     match = TAG_REGEX.search(full_text)
     if match:
         tag = match.group(0).upper()
         clean = tag.lstrip("#")
         return tag, f"https://brawlify.com/stats/profile/{clean}", f"https://brawltime.ninja/profile/{clean}", True
 
-    # 2. Tag labeled with words ID/TAG
+    # 3. Tag in full OCR text
+    if ocr_text:
+        m_ocr = TAG_REGEX.search(ocr_text)
+        if m_ocr:
+            tag = m_ocr.group(0).upper()
+            clean = tag.lstrip("#")
+            return tag, f"https://brawlify.com/stats/profile/{clean}", f"https://brawltime.ninja/profile/{clean}", True
+
+    # 4. Tag labeled with words ID/TAG
     match_indirect = TAG_INDIRECT_REGEX.search(full_text)
     if match_indirect:
         clean = match_indirect.group(1).upper()
         tag = f"#{clean}"
         return tag, f"https://brawlify.com/stats/profile/{clean}", f"https://brawltime.ninja/profile/{clean}", True
 
-    # 3. Fallback: Nickname for Brawlify search
-    match_nick = NICK_REGEX.search(full_text)
-    if match_nick:
-        nick = match_nick.group(1).strip()
-        encoded = urllib.parse.quote(nick)
-        return f"Ник: {nick}", f"https://brawlify.com/stats/search?q={encoded}", None, False
+    # 5. Nickname from OCR or description
+    candidate_nick = ocr_nick
+    if not candidate_nick:
+        match_nick = NICK_REGEX.search(full_text)
+        if match_nick:
+            candidate_nick = match_nick.group(1).strip()
 
-    return None, None, None, False
+    if candidate_nick:
+        encoded = urllib.parse.quote(candidate_nick)
+        return f"Ник: {candidate_nick}", f"https://brawlify.com/stats/search?q={encoded}", f"https://brawltime.ninja/search?q={encoded}", False
+
+    return "Скрыт на фото и в описании", "https://brawlify.com", "https://brawltime.ninja", False
 
 def extract_site_score(desc, detailed_desc=""):
     """
@@ -162,8 +185,19 @@ def calculate_brawl_fair_valuation(lot_dict):
     if price < 70 or price > 600:
         return False, 0, 0, 0, [], "Цена вне диапазона арбитража", None
 
-    # Step 1: Player Tag Identification
-    player_tag, brawlify_url, brawltime_url, is_verified_tag = extract_player_tag_and_profile(desc, detailed_desc)
+    # Step 1: Player Tag Identification (Text + Screenshot OCR)
+    ocr_tag = lot_dict.get("ocr_tag")
+    ocr_nick = lot_dict.get("ocr_nick")
+    ocr_text = lot_dict.get("ocr_text", "")
+    ocr_trophies = lot_dict.get("ocr_trophies")
+
+    if (not trophies or trophies == 0) and ocr_trophies:
+        trophies = ocr_trophies
+        lot_dict["trophies"] = ocr_trophies
+
+    player_tag, brawlify_url, brawltime_url, is_verified_tag = extract_player_tag_and_profile(
+        desc, detailed_desc, ocr_tag=ocr_tag, ocr_nick=ocr_nick, ocr_text=ocr_text
+    )
     
     # Step 2: Site Automated Score
     site_score_text = extract_site_score(desc, detailed_desc)
