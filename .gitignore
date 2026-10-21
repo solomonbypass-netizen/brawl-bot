@@ -1,4 +1,5 @@
 seen_offers.json
+.env
 __pycache__/
 *.log
 .vscode/
